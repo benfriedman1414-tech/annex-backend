@@ -1,0 +1,24 @@
+# Render.com blueprint — deploy as an always-on background worker.
+# (Also a useful reference for Railway / Fly.io: same start command + env vars.)
+services:
+  - type: worker
+    name: annex-backend
+    runtime: node
+    plan: starter
+    buildCommand: ""
+    startCommand: node src/run.js --watch
+    envVars:
+      - key: AIRTABLE_API_KEY
+        sync: false            # paste this in the Render dashboard (kept secret)
+      - key: AIRTABLE_BASE_ID
+        value: appaa8u2MVRT4obQP
+      - key: AIRTABLE_RULES_TABLE
+        value: Rules
+      - key: AIRTABLE_ORDERS_TABLE
+        value: Orders
+      - key: RESEND_API_KEY
+        sync: false            # optional — leave unset to skip auto-email
+      - key: FROM_EMAIL
+        sync: false
+      - key: POLL_SECONDS
+        value: "120"

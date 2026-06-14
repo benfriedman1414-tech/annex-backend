@@ -1,0 +1,13 @@
+{
+  "name": "annex-backend",
+  "version": "1.0.0",
+  "description": "Annex ADU plan pre-check backend — reads orders from Airtable, runs the cited rules engine, generates pass/flag reports, and delivers them.",
+  "type": "module",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node src/run.js",
+    "watch": "node src/run.js --watch",
+    "test": "node test/selftest.js"
+  },
+  "license": "UNLICENSED"
+}
