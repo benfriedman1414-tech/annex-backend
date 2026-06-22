@@ -9,8 +9,14 @@ import { normalizeOrder } from './parse.js';
 import { evaluateOrder } from './rules.js';
 import { buildReportHtml, buildEmailText } from './report.js';
 import { sendReportEmail, emailEnabled } from './email.js';
+import { extractFromPhoto, visionEnabled, buildExtractionNotes } from './vision.js';
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
+
+// Free-text columns the parser reads — used as a fallback target if the
+// "Extraction notes" column hasn't been added to Airtable yet.
+const DETAIL_FIELDS = ['Concerns', 'ADU details', 'Your ADU details', 'Details', 'Message'];
+const pickDetailsField = (fields) => DETAIL_FIELDS.find((k) => fields[k] != null) || 'Concerns';
 
 async function processOnce() {
   assertAirtableConfigured();
@@ -24,6 +30,58 @@ async function processOnce() {
   let done = 0;
 
   for (const rec of pending) {
+    const f = rec.fields || {};
+    const status = (f.Status || '').toString().trim();
+    const orderName = f.Name || rec.id;
+    const photos = f[config.airtable.photoField];
+    const hasPhoto = Array.isArray(photos) && photos.length > 0;
+    const unread = status === '' || status === config.airtable.newStatus;
+
+    // ── Photo intake: read an unread plan photo, then HOLD for confirmation ──
+    // (We never run the check on photo-derived numbers until a human confirms.)
+    if (hasPhoto && unread) {
+      if (!visionEnabled()) {
+        // Keyless mode: queue the photo for a human to read (once), instead of
+        // re-skipping it every poll. Auto-reading turns on when ANTHROPIC_API_KEY is set.
+        const note = `Plan photo uploaded. Automatic reading is off (no ANTHROPIC_API_KEY). Read the dimensions off the photo, type them into the details box, then set Status to "${config.airtable.confirmedStatus}".`;
+        try {
+          await updateOrderStatus(rec.id, config.airtable.needsConfirmationStatus, { [config.airtable.notesField]: note });
+        } catch (e) {
+          if (/unknown field/i.test(e.message)) await updateOrderStatus(rec.id, config.airtable.needsConfirmationStatus);
+          else throw e;
+        }
+        log(`• ${orderName}: plan photo queued for manual reading → ${config.airtable.needsConfirmationStatus}. (Set ANTHROPIC_API_KEY to auto-read.)`);
+        continue;
+      }
+      try {
+        await updateOrderStatus(rec.id, config.airtable.readingStatus);
+        const extraction = await extractFromPhoto(photos[0]);
+        const notes = buildExtractionNotes(extraction, config.vision.model);
+        try {
+          await updateOrderStatus(rec.id, config.airtable.needsConfirmationStatus, { [config.airtable.notesField]: notes });
+        } catch (e) {
+          // "Extraction notes" column not added yet → fall back to the free-text details box.
+          if (/unknown field/i.test(e.message)) {
+            const detailsField = pickDetailsField(f);
+            const existing = (f[detailsField] || '').toString();
+            await updateOrderStatus(rec.id, config.airtable.needsConfirmationStatus, { [detailsField]: existing ? `${existing}\n\n${notes}` : notes });
+            log(`  (note: "${config.airtable.notesField}" field missing — wrote extraction into "${detailsField}")`);
+          } else throw e;
+        }
+        const flagged = extraction.needsConfirmation || [];
+        log(`✎ ${orderName}: read ${extraction.documentType} → ${config.airtable.needsConfirmationStatus}${flagged.length ? ` · confirm: ${flagged.join(', ')}` : ' · read cleanly'}`);
+      } catch (err) {
+        log(`✗ ${orderName}: plan-photo read failed (${err.message}) — left at "${config.airtable.readingStatus}". Reset Status to re-try.`);
+      }
+      continue;
+    }
+
+    // Orders still awaiting human confirmation (or mid-read) are not checked yet.
+    if (status === config.airtable.needsConfirmationStatus || status === config.airtable.readingStatus) {
+      continue;
+    }
+
+    // ── Rules engine: text orders, and photo orders the homeowner has Confirmed ──
     const order = normalizeOrder(rec);
     try {
       const result = evaluateOrder(rules, order);

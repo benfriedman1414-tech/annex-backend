@@ -63,7 +63,9 @@ export async function updateOrderStatus(recordId, status, extraFields = {}) {
   const res = await fetch(url, {
     method: 'PATCH',
     headers: headers(),
-    body: JSON.stringify({ fields: { Status: status, ...extraFields } }),
+    // typecast: true lets Airtable auto-create new single-select options (the
+    // photo-intake statuses) and coerce values to the column type on write.
+    body: JSON.stringify({ typecast: true, fields: { Status: status, ...extraFields } }),
   });
   if (!res.ok) throw new Error(`Airtable status update failed: ${res.status} ${await res.text()}`);
   return res.json();

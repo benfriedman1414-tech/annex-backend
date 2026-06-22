@@ -38,11 +38,23 @@ export const config = {
     newStatus: env('ORDERS_NEW_STATUS', ''),
     doneStatus: env('ORDERS_DONE_STATUS', 'Report ready'),
     sentStatus: env('ORDERS_SENT_STATUS', 'Report sent'),
+    // Photo-intake lifecycle (Part 2): New → Reading photo → Needs confirmation → Confirmed → Report ready/sent
+    readingStatus: env('ORDERS_READING_STATUS', 'Reading photo'),
+    needsConfirmationStatus: env('ORDERS_NEEDS_CONFIRMATION_STATUS', 'Needs confirmation'),
+    confirmedStatus: env('ORDERS_CONFIRMED_STATUS', 'Confirmed'),
+    photoField: env('ORDERS_PHOTO_FIELD', 'Plan photo'),
+    notesField: env('ORDERS_NOTES_FIELD', 'Extraction notes'),
   },
   email: {
     resendKey: env('RESEND_API_KEY'),
     from: env('FROM_EMAIL', 'Annex <hello@example.com>'),
     replyTo: env('REPLY_TO_EMAIL'),
+  },
+  // Photo intake ("picture magic") — vision extraction via the Anthropic API.
+  // Leave ANTHROPIC_API_KEY blank to disable photo reading (text orders still work).
+  vision: {
+    apiKey: env('ANTHROPIC_API_KEY'),
+    model: env('VISION_MODEL', 'claude-opus-4-8'),
   },
   reportsDir: path.resolve(root, env('REPORTS_DIR', './reports')),
   pollSeconds: Number(env('POLL_SECONDS', '120')) || 120,

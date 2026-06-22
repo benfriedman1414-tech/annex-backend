@@ -34,7 +34,10 @@ function grab(text, patterns) {
 
 export function normalizeOrder(record) {
   const f = record.fields || {};
-  const free = f['Concerns'] || f['ADU details'] || f['Your ADU details'] || f['Details'] || f['Message'] || '';
+  // Concatenate every free-text source (so a photo order's "Extraction notes"
+  // and any typed "Concerns" are both searched, not just the first present).
+  const free = [f['Concerns'], f['ADU details'], f['Your ADU details'], f['Details'], f['Message'], f['Extraction notes']]
+    .filter(Boolean).join('\n');
 
   const aduTypeRaw = (f['ADU type'] || '').toString();
   let aduType = aduTypeRaw;
