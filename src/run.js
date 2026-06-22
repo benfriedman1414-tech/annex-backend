@@ -9,7 +9,7 @@ import { normalizeOrder } from './parse.js';
 import { evaluateOrder } from './rules.js';
 import { buildReportHtml, buildEmailText } from './report.js';
 import { sendReportEmail, emailEnabled } from './email.js';
-import { extractFromPhoto, visionEnabled, buildExtractionNotes } from './vision.js';
+import { extractFromPhoto, visionEnabled, buildExtractionNotes, normalizePhoto } from './vision.js';
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
@@ -33,8 +33,8 @@ async function processOnce() {
     const f = rec.fields || {};
     const status = (f.Status || '').toString().trim();
     const orderName = f.Name || rec.id;
-    const photos = f[config.airtable.photoField];
-    const hasPhoto = Array.isArray(photos) && photos.length > 0;
+    const photo = normalizePhoto(f[config.airtable.photoField]);
+    const hasPhoto = !!photo;
     const unread = status === '' || status === config.airtable.newStatus;
 
     // ── Photo intake: read an unread plan photo, then HOLD for confirmation ──
@@ -55,7 +55,7 @@ async function processOnce() {
       }
       try {
         await updateOrderStatus(rec.id, config.airtable.readingStatus);
-        const extraction = await extractFromPhoto(photos[0]);
+        const extraction = await extractFromPhoto(photo);
         const notes = buildExtractionNotes(extraction, config.vision.model);
         try {
           await updateOrderStatus(rec.id, config.airtable.needsConfirmationStatus, { [config.airtable.notesField]: notes });

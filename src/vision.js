@@ -79,6 +79,28 @@ export function visionEnabled() {
   return Boolean(config.vision.apiKey);
 }
 
+// Normalize whatever the "Plan photo" column holds into a single
+// { url, type, filename } object (or null if there's no photo).
+//
+// Airtable Attachment fields come back as an array of attachment objects, but
+// Softr's file-upload form field writes the uploaded file's URL as a plain
+// STRING into the column. We accept both so the photo is detected and readable
+// regardless of how the column is configured.
+export function normalizePhoto(value) {
+  if (Array.isArray(value)) {
+    const a = value[0];
+    return a && a.url ? { url: a.url, type: a.type || '', filename: a.filename || '' } : null;
+  }
+  if (typeof value === 'string') {
+    const url = value.trim();
+    if (/^https?:\/\//i.test(url)) {
+      const filename = url.split('?')[0].split('/').pop() || '';
+      return { url, type: '', filename };
+    }
+  }
+  return null;
+}
+
 // Build the image/document content block from an Airtable attachment object
 // ({ url, type, filename, ... }). PDFs go in as a document block; images as an
 // image block. Bytes are fetched and base64-encoded so we don't depend on the
@@ -88,12 +110,17 @@ async function mediaBlock(att) {
   if (!res.ok) throw new Error(`could not download plan photo (${res.status})`);
   const data = Buffer.from(await res.arrayBuffer()).toString('base64');
   const mime = (att.type || '').toLowerCase();
-  const name = (att.filename || '').toLowerCase();
+  const name = (att.filename || att.url || '').toLowerCase();
   if (mime === 'application/pdf' || name.endsWith('.pdf')) {
     return { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } };
   }
   const supported = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
-  const media_type = supported.includes(mime) ? mime : 'image/jpeg';
+  // Softr writes only a URL (no MIME), so fall back to the file extension.
+  const byExt = name.endsWith('.png') ? 'image/png'
+    : name.endsWith('.webp') ? 'image/webp'
+      : name.endsWith('.gif') ? 'image/gif'
+        : (name.endsWith('.jpg') || name.endsWith('.jpeg')) ? 'image/jpeg' : '';
+  const media_type = supported.includes(mime) ? mime : (byExt || 'image/jpeg');
   return { type: 'image', source: { type: 'base64', media_type, data } };
 }
 
