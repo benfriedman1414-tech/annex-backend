@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { normalizeOrder } from '../src/parse.js';
 import { evaluateOrder, STATUS } from '../src/rules.js';
 import { buildReportHtml } from '../src/report.js';
+import { buildExtractionNotes } from '../src/vision.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const outDir = path.resolve(__dirname, '..', 'reports');
@@ -83,6 +84,33 @@ const partial = normalizeOrder({ id: 'recPART1', fields: { Name: 'Pat Doe', 'ADU
 const r3 = evaluateOrder(RULES, partial);
 const h3 = r3.rows.find((r) => /height - detached/i.test(r.requirement));
 assert(h3 && h3.status === STATUS.NEEDS_INPUT, 'missing height is flagged NEEDS INPUT, never a silent pass');
+
+// ── Test 4: photo intake — extraction notes round-trip into the engine ──
+divider('TEST 4 — plan-photo extraction → "Extraction notes" → parsed by the engine');
+const fakeExtraction = {
+  readable: true, documentType: 'site plan', aduType: 'Detached', city: 'Walnut Creek', nearTransit: null,
+  heightFt: { value: 15.5, confidence: 'high', note: 'ridge height callout' },
+  stories: { value: 1, confidence: 'high', note: '' },
+  aduSqft: { value: 812, confidence: 'high', note: 'floor area schedule' },
+  lotSqft: { value: 6000, confidence: 'medium', note: 'lot dims 60x100' },
+  bedrooms: { value: 1, confidence: 'high', note: '' },
+  rearSetbackFt: { value: 4, confidence: 'high', note: 'rear dimension line' },
+  sideSetbackFt: { value: 3, confidence: 'low', note: 'faint, hard to read' },
+  distanceFt: { value: null, confidence: 'none', note: 'not shown' },
+  needsConfirmation: ['sideSetbackFt', 'distanceFt'], summary: 'Detached ADU site plan.',
+};
+const notes = buildExtractionNotes(fakeExtraction, 'claude-opus-4-8');
+const fromPhoto = normalizeOrder({ id: 'recPHOTO1', fields: { Name: 'Plan Upload', 'ADU type': 'Detached', 'Extraction notes': notes } });
+console.log('  parsed-from-notes:', JSON.stringify({ adu: fromPhoto.aduSqft, bed: fromPhoto.bedrooms, ht: fromPhoto.heightFt, side: fromPhoto.sideSetbackFt, rear: fromPhoto.rearSetbackFt, lot: fromPhoto.lotSqft }));
+assert(fromPhoto.aduSqft === 812, 'extraction notes → ADU size 812 read by the parser');
+assert(fromPhoto.sideSetbackFt === 3, 'extraction notes → side setback 3 ft read by the parser');
+assert(Math.abs(fromPhoto.heightFt - 15.5) < 0.01, 'extraction notes → height 15.5 ft read by the parser');
+assert(fromPhoto.lotSqft === 6000, 'extraction notes → lot 6000 sq ft read by the parser');
+assert(fromPhoto.bedrooms === 1, 'extraction notes → 1 bedroom read by the parser');
+const r4 = evaluateOrder(RULES, fromPhoto);
+const side4 = r4.rows.find((r) => /side setback/i.test(r.requirement));
+assert(side4 && side4.status === STATUS.FLAG, 'photo-derived order FLAGs the 3 ft side setback');
+assert(notes.includes('Confirm before running the check: sideSetbackFt, distanceFt'), 'notes list the fields to confirm with the homeowner');
 
 // ── Write a sample report so we can eyeball the design ──
 fs.mkdirSync(outDir, { recursive: true });
