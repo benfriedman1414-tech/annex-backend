@@ -58,6 +58,16 @@ Runs the engine on a sample order (structured **and** free-text), checks the ver
 
 The engine prefers the structured Orders columns (`Lot size sqft`, `ADU sqft`, `Bedrooms`, `Height ft`, `Rear setback ft`, `Side setback ft`, etc.). If those are empty — which is the case for the current beta form, where everything goes in the free-text **Concerns** box — it parses the numbers out of that text (e.g. `side setback 3 ft`, `812 sq ft`, `15'6"`). So it works today, and gets even more reliable if you later add the granular fields to the form.
 
+## Photo intake ("snap a photo of your plans")
+
+Set `ANTHROPIC_API_KEY` and the backend reads dimensions off an uploaded site plan, floor plan, or hand sketch — then confirms them with the homeowner before checking. It plugs into the front of the existing pipeline (the rules engine and report are unchanged):
+
+```
+Plan photo upload → vision extraction → numbers + notes on the order → homeowner confirms → existing engine → cited report
+```
+
+For each order with a **Plan photo** attachment, it calls a vision model (Anthropic, strict JSON), writes what it read into **Extraction notes** with per-field confidence, and sets the order to **Needs confirmation**. Anything ambiguous is flagged. Once you/the homeowner confirm (set Status to **Confirmed**), the normal check runs. Required Airtable changes: add a **Plan photo** (Attachment) field, an **Extraction notes** (Long text) field, and extend the **Status** options to `New → Reading photo → Needs confirmation → Confirmed → Report ready → Report sent`. Leave `ANTHROPIC_API_KEY` blank to disable — typed/free-text orders are unaffected.
+
 ## Files
 
 | File | What it does |
@@ -68,6 +78,7 @@ The engine prefers the structured Orders columns (`Lot size sqft`, `ADU sqft`, `
 | `src/rules.js` | The rules engine + threshold parser |
 | `src/report.js` | Builds the dark/emerald HTML report |
 | `src/email.js` | Optional Resend delivery |
+| `src/vision.js` | Optional photo intake — reads dimensions off a plan image |
 | `test/selftest.js` | Offline test + sample report |
 
 ## Running it automatically, always-on
