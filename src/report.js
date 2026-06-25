@@ -16,6 +16,13 @@ export function buildReportHtml(order, result, opts = {}) {
   const { rows, summary } = result;
   const typeLabel = (order.aduType || 'ADU').toUpperCase();
 
+  // Jurisdiction label — California state law always applies; the county adds local standards.
+  const county = order.county || '';
+  const jLabel = order.city && county ? `${order.city}, ${county} County`
+    : county ? `${county} County`
+      : order.city ? order.city
+        : 'California — local jurisdiction to confirm';
+
   const verdictBits = [];
   if (summary.pass) verdictBits.push(`${summary.pass} PASS`);
   if (summary.flag) verdictBits.push(`${summary.flag} FLAG${summary.flag > 1 ? 'S' : ''}`);
@@ -117,7 +124,7 @@ td.val{color:var(--mist)}
     <h1>${esc(order.name || 'Your ADU pre-check')}</h1>
     <div class="meta">
       <span>Type: <b>${esc(order.aduType || '—')}</b></span>
-      ${order.city ? `<span>Jurisdiction: <b>${esc(order.city)}, Contra Costa County</b></span>` : '<span>Jurisdiction: <b>Contra Costa County</b></span>'}
+      <span>Jurisdiction: <b>${esc(jLabel)}</b></span>
       <span>Date: <b>${esc(date)}</b></span>
       <span>Requirements checked: <b>${summary.total}</b></span>
     </div>
@@ -133,8 +140,8 @@ td.val{color:var(--mist)}
   ${flagsHtml}
   ${reviewHtml}
   <div class="foot">
-    <p>Annex provides an informational pre-check against published California state and Contra Costa County municipal requirements, current as of the report date. It is not a building department, does not issue approvals or permits, and is not legal, architectural, or engineering advice. The determinations of your local jurisdiction govern.</p>
-    <p class="sig">ANNEX ✦ Contra Costa County, CA · hello@annex.example</p>
+    <p>Annex provides an informational pre-check against published California state ADU law and applicable local (county/city) requirements, current as of the report date. It is not a building department, does not issue approvals or permits, and is not legal, architectural, or engineering advice. The determinations of your local jurisdiction govern.</p>
+    <p class="sig">ANNEX ✦ Northern California · hello@annexadu.com</p>
   </div>
 </div></div></body></html>`;
 }

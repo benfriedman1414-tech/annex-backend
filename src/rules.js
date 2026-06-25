@@ -40,8 +40,27 @@ function mapMetric(requirement) {
   return null;
 }
 
-// Does this rule apply to this order (by ADU type + bedroom context)?
+// ── Jurisdiction routing ───────────────────────────────────────
+// California state ADU law (Cal. Gov. Code §663xx) applies in EVERY county.
+// A rule whose citation names only a county applies just to that county.
+// We infer this from the citation/requirement text — no extra data field needed.
+const COUNTY_NAMES = ['Contra Costa', 'San Mateo', 'Alameda', 'Santa Clara'];
+function ruleCounty(rule) {
+  const cite = `${rule.citation || ''} ${rule.requirement || ''}`;
+  // Anything citing state law (or a generic "[City]"/"Jurisdiction" checklist) applies everywhere.
+  // Match real state markers only — "Gov. Code", a §66xxx section, or "state ADU".
+  // (Avoid bare "cal" — it appears inside "loCAL".)
+  if (/gov(ernment)?\.?\s*code|§\s*66\d{3}|state adu/i.test(cite)) return null;
+  for (const c of COUNTY_NAMES) if (cite.toLowerCase().includes(c.toLowerCase())) return c;
+  return null; // default: applies everywhere
+}
+
+// Does this rule apply to this order (by jurisdiction, ADU type + bedroom context)?
 function ruleApplies(rule, order) {
+  // Jurisdiction: skip a county-specific rule when the order is in a different county.
+  const rc = ruleCounty(rule);
+  if (rc && lc(order.county) !== lc(rc)) return false;
+
   const applies = (rule.appliesTo || []).map(lc);
   const type = lc(order.aduType);
   if (applies.length && !applies.includes('all')) {
