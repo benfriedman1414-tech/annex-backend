@@ -103,6 +103,19 @@ export function normalizeOrder(record) {
   const city = f['City'] || grab(free, [/in ([a-z ]+?)(?:,|\.|$)/]) || '';
   const county = deriveCounty(f['County'], city, free);
 
+  // ADU floor area: prefer the structured field, then ADU-adjacent phrasings.
+  // Only fall back to a bare "N sq ft" figure when NO lot size is mentioned —
+  // otherwise we can't safely tell the ADU area from the lot area (leave it
+  // null so the engine asks for the number rather than guessing).
+  let aduSqft = num(f['ADU sqft']) ?? grab(free, [
+    /adu[^0-9]{0,14}(\d[\d,\.]*)\s*(?:sq ?ft|sf)/,
+    /(\d[\d,\.]*)\s*(?:sq ?ft|sf)\s*adu/,
+    /unit[^0-9]{0,12}(\d[\d,\.]*)\s*(?:sq ?ft|sf)/,
+  ]);
+  if (aduSqft == null && !/\blot\b/i.test(free)) {
+    aduSqft = grab(free, [/(?<![\d.,])(\d[\d,\.]{2,})\s*(?:sq ?ft|sf)/]);
+  }
+
   return {
     id: record.id,
     name: f['Name'] || '',
@@ -115,7 +128,7 @@ export function normalizeOrder(record) {
     concerns: free,
 
     lotSqft: num(f['Lot size sqft']) ?? grab(free, [/lot[^0-9]{0,12}(\d[\d,\.]*)\s*(?:sq ?ft|sf)/, /(\d[\d,\.]*)\s*(?:sq ?ft|sf)\s*lot/]),
-    aduSqft: num(f['ADU sqft']) ?? grab(free, [/adu[^0-9]{0,14}(\d[\d,\.]*)\s*(?:sq ?ft|sf)/, /(\d[\d,\.]*)\s*(?:sq ?ft|sf)\s*adu/, /unit[^0-9]{0,12}(\d[\d,\.]*)\s*(?:sq ?ft|sf)/]),
+    aduSqft,
     bedrooms: num(f['Bedrooms']) ?? grab(free, [/(\d+)\s*(?:bed|br\b|bedroom)/, /(studio)/]),
     heightFt: feet(f['Height ft']) ?? grab(free, [/height[^0-9]{0,12}(\d+(?:\.\d+)?\s*'?\s*\d*"?)/, /(\d+(?:\.\d+)?\s*'?\s*\d*"?)\s*(?:tall|high|height)/]),
     stories: num(f['Stories']) ?? grab(free, [/(\d+)\s*(?:stor|level)/]),
