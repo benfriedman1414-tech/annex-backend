@@ -112,7 +112,11 @@ td.val{color:var(--mist)}
 .foot{padding:22px 34px 26px;border-top:1px solid var(--line)}
 .foot p{font-size:11.5px;line-height:1.6;color:#7A8F85}
 .sig{margin-top:14px;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted)}
-@media print{body{background:#0A1411;padding:0}.card{box-shadow:none;border:none;border-radius:0}}
+.recheck{padding:24px 34px;border-top:1px solid var(--line);background:rgba(27,232,159,.05);text-align:center}
+.recheck h3{font-family:'Instrument Serif',serif;font-weight:400;font-size:23px;color:#fff;margin-bottom:6px}
+.recheck p{font-size:13px;color:var(--muted);margin-bottom:16px;max-width:520px;margin-left:auto;margin-right:auto}
+.recheck a{display:inline-block;background:var(--emerald);color:#062018;font-weight:600;text-decoration:none;padding:12px 26px;border-radius:9px;font-family:'Sora',sans-serif;font-size:14px}
+@media print{body{background:#0A1411;padding:0}.card{box-shadow:none;border:none;border-radius:0}.recheck{display:none}}
 </style></head>
 <body><div class="wrap"><div class="card">
   <div class="head">
@@ -139,6 +143,11 @@ td.val{color:var(--mist)}
   </table>
   ${flagsHtml}
   ${reviewHtml}
+  <div class="recheck">
+    <h3>Made changes? Re-check for $39</h3>
+    <p>Once you've revised your plans to clear the items above, submit the updated set and we'll re-run the full pre-check &mdash; cited report in 24 hours, at the returning-customer rate.</p>
+    <a href="https://buy.stripe.com/14A8wP1fw3MY4e85kw9EI02">Re-check my plans &mdash; $39</a>
+  </div>
   <div class="foot">
     <p>Annex provides an informational pre-check against published California state ADU law and applicable local (county/city) requirements, current as of the report date. It is not a building department, does not issue approvals or permits, and is not legal, architectural, or engineering advice. The determinations of your local jurisdiction govern.</p>
     <p class="sig">ANNEX ✦ Northern California · hello@annexadu.com</p>
@@ -157,6 +166,8 @@ export function buildEmailText(order, result) {
     `Result: ${summary.pass} pass, ${summary.flag} flag(s), ${summary.review} to review${summary.needsInput ? `, ${summary.needsInput} needing a number from you` : ''}.`,
     ``,
     `Your full report (every requirement, cited to code, with what to change) is attached / below.`,
+    ``,
+    `Made changes after reading it? Re-check your revised plans for $39 (returning-customer rate): https://buy.stripe.com/14A8wP1fw3MY4e85kw9EI02`,
     ``,
     `— Annex`,
   ].join('\n');
