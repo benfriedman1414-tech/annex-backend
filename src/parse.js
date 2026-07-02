@@ -120,6 +120,9 @@ export function normalizeOrder(record) {
     id: record.id,
     name: f['Name'] || '',
     email: f['Email'] || '',
+    // Stripe Checkout session carried through the payment-link redirect ->
+    // hidden form field. Used only to FLAG suspicious orders, never to block.
+    stripeSession: (f['Stripe session'] ?? f['Stripe session id'] ?? f['session_id'] ?? '').toString().trim(),
     city,
     county,
     address: f['Address'] || '',

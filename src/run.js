@@ -4,13 +4,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config, assertAirtableConfigured } from './config.js';
-import { fetchRules, fetchPendingOrders, updateOrderStatus } from './airtable.js';
+import { fetchRules, fetchAllOrders, filterPending, updateOrderStatus, updateOrderFields } from './airtable.js';
 import { normalizeOrder } from './parse.js';
 import { evaluateOrder } from './rules.js';
 import { buildReportHtml, buildEmailText } from './report.js';
 import { sendReportEmail, emailEnabled } from './email.js';
 import { extractFromPhoto, visionEnabled, buildExtractionNotes, normalizePhoto } from './vision.js';
 import { remediateOrder } from './remediate.js';
+import { sendPhotoAck, sendOwnerAlert, notifyEnabled } from './notify.js';
+import { buildSessionIndex, paymentFlag } from './payment.js';
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
@@ -23,7 +25,9 @@ async function processOnce() {
   assertAirtableConfigured();
   const rules = await fetchRules();
   log(`Loaded ${rules.length} rules from Airtable.`);
-  const pending = await fetchPendingOrders();
+  const allOrders = await fetchAllOrders();
+  const pending = filterPending(allOrders);
+  const sessionIndex = buildSessionIndex(allOrders);
   log(`Found ${pending.length} order(s) to process.`);
   if (!pending.length) return 0;
 
@@ -52,6 +56,13 @@ async function processOnce() {
           else throw e;
         }
         log(`• ${orderName}: plan photo queued for manual reading → ${config.airtable.needsConfirmationStatus}. (Set ANTHROPIC_API_KEY to auto-read.)`);
+        try {
+          await sendPhotoAck({ name: f.Name, email: f.Email });
+          await sendOwnerAlert(`Action needed: read plan photo for "${orderName}"`, [
+            `Order ${rec.id} (${f.Email || 'no email'}) uploaded a plan photo and is waiting.`,
+            `Read the dimensions, type them into the details box, then set Status to "${config.airtable.confirmedStatus}".`,
+          ]);
+        } catch (e) { log(`  (notify failed: ${e.message})`); }
         continue;
       }
       try {
@@ -71,6 +82,14 @@ async function processOnce() {
         }
         const flagged = extraction.needsConfirmation || [];
         log(`✎ ${orderName}: read ${extraction.documentType} → ${config.airtable.needsConfirmationStatus}${flagged.length ? ` · confirm: ${flagged.join(', ')}` : ' · read cleanly'}`);
+        try {
+          await sendPhotoAck({ name: f.Name, email: f.Email });
+          await sendOwnerAlert(`Action needed: confirm reading for "${orderName}"`, [
+            `Order ${rec.id} (${f.Email || 'no email'}) — plan photo auto-read, awaiting your confirmation.`,
+            flagged.length ? `Fields to double-check: ${flagged.join(', ')}` : 'All fields read at high confidence.',
+            `Review the extraction in Airtable, then set Status to "${config.airtable.confirmedStatus}".`,
+          ]);
+        } catch (e) { log(`  (notify failed: ${e.message})`); }
       } catch (err) {
         log(`✗ ${orderName}: plan-photo read failed (${err.message}) — left at "${config.airtable.readingStatus}". Reset Status to re-try.`);
       }
@@ -85,6 +104,20 @@ async function processOnce() {
     // ── Rules engine: text orders, and photo orders the homeowner has Confirmed ──
     const order = normalizeOrder(rec);
     try {
+      // Payment linkage: flag suspicious orders (missing/duplicate Stripe
+      // session), alert the owner — and process the order regardless.
+      const payFlag = paymentFlag({ session: order.stripeSession, orderId: order.id, index: sessionIndex });
+      if (payFlag) {
+        log(`  ⚠ payment: ${payFlag}`);
+        try { await updateOrderFields(order.id, { 'Payment flag': payFlag }); }
+        catch (e) { if (!/unknown field/i.test(e.message)) throw e; }
+        try {
+          await sendOwnerAlert(`Payment check: "${order.name || order.id}"`, [
+            payFlag,
+            `Order ${order.id} · ${order.email || 'no email'} · processed normally — verify the payment in Stripe.`,
+          ]);
+        } catch (e) { log(`  (alert failed: ${e.message})`); }
+      }
       const result = evaluateOrder(rules, order);
       // Remediation pass: attach verified fix options to every FLAG row.
       // Best-effort — a remediation failure never blocks the report.

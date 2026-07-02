@@ -46,9 +46,14 @@ export async function fetchRules() {
   }).filter((r) => r.requirement);
 }
 
-// Return raw order records that still need processing.
-export async function fetchPendingOrders() {
-  const records = await listAll(config.airtable.ordersTable);
+// Every order record (used for the payment-session index) — one fetch that
+// fetchPendingOrders/filterPending derive from, so a poll costs one listing.
+export async function fetchAllOrders() {
+  return listAll(config.airtable.ordersTable);
+}
+
+// Which of these records still need processing.
+export function filterPending(records) {
   const { newStatus, doneStatus, sentStatus } = config.airtable;
   return records.filter((rec) => {
     const status = (rec.fields?.Status || '').toString().trim();
@@ -56,6 +61,11 @@ export async function fetchPendingOrders() {
     if (newStatus) return status === newStatus; // explicit "new" gate
     return true; // otherwise: anything not already done is fair game
   });
+}
+
+// Return raw order records that still need processing.
+export async function fetchPendingOrders() {
+  return filterPending(await fetchAllOrders());
 }
 
 export async function updateOrderStatus(recordId, status, extraFields = {}) {
@@ -68,5 +78,17 @@ export async function updateOrderStatus(recordId, status, extraFields = {}) {
     body: JSON.stringify({ typecast: true, fields: { Status: status, ...extraFields } }),
   });
   if (!res.ok) throw new Error(`Airtable status update failed: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+// Patch arbitrary fields WITHOUT touching Status (e.g. the "Payment flag").
+export async function updateOrderFields(recordId, fields) {
+  const url = `${API}/${config.airtable.baseId}/${encodeURIComponent(config.airtable.ordersTable)}/${recordId}`;
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: headers(),
+    body: JSON.stringify({ typecast: true, fields }),
+  });
+  if (!res.ok) throw new Error(`Airtable field update failed: ${res.status} ${await res.text()}`);
   return res.json();
 }

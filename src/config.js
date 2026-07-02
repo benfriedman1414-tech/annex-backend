@@ -64,6 +64,10 @@ export const config = {
     model: env('REMEDIATION_MODEL', 'claude-fable-5'),
     fallbackModel: env('REMEDIATION_FALLBACK_MODEL', 'claude-opus-4-8'),
   },
+  // Flow notifications (photo acks + owner action/anomaly alerts).
+  notify: {
+    owner: env('OWNER_EMAIL', 'hello@annexadu.com'),
+  },
   reportsDir: path.resolve(root, env('REPORTS_DIR', './reports')),
   pollSeconds: Number(env('POLL_SECONDS', '120')) || 120,
 };
