@@ -40,6 +40,18 @@ export function buildReportHtml(order, result, opts = {}) {
       </tr>`).join('');
 
   const flags = rows.filter((r) => r.status === STATUS.FLAG);
+  // Remediation options (attached by remediate.js). Each verified option was
+  // re-run through the full ruleset with the proposed value before publication.
+  const fixesHtml = (r) => (r.fixes && r.fixes.length ? `
+          <div class="fixes">
+            <span class="fixes-head mono">FIX OPTIONS — VERIFIED AGAINST YOUR FULL CHECK</span>
+            ${r.fixes.map((o, j) => `
+            <div class="fix">
+              <p class="fix-line"><span class="fix-n mono">${j + 1}</span> <strong>${esc(o.title)}</strong>${o.amount ? ` <span class="fix-amt mono">${esc(o.amount)}</span>` : ''}</p>
+              <p class="fix-body">${esc(o.change)}${o.buildImpact ? ` <em>${esc(o.buildImpact)}</em>` : ''}</p>
+              <p class="fix-fx mono ${o.verified ? 'ok' : 'conf'}">${o.verified ? '✓ ' : '△ '}${esc(o.effects)}${o.effort ? ` · effort: ${esc(o.effort)}` : ''}</p>
+            </div>`).join('')}
+          </div>` : '');
   const flagsHtml = flags.length ? `
     <div class="notes">
       <h3>What to fix</h3>
@@ -49,6 +61,7 @@ export function buildReportHtml(order, result, opts = {}) {
           <p><strong>${esc(r.requirement)}</strong> — your ${esc(r.yourValue)} vs required ${esc(r.threshold)}.
           ${r.fix ? esc(r.fix) : 'Adjust to meet the cited requirement before submitting.'}
           <span class="mono cite">${esc(r.citation)}</span></p>
+          ${fixesHtml(r)}
         </div>`).join('')}
     </div>` : '';
 
@@ -109,6 +122,19 @@ td.val{color:var(--mist)}
 .note-tag{display:inline-block;font-size:10px;letter-spacing:.08em;padding:3px 8px;border-radius:3px;margin-bottom:6px;background:rgba(255,200,61,.14);color:var(--flag);border:1px solid rgba(255,200,61,.35)}
 .note-tag.tag-review{background:rgba(166,191,179,.12);color:var(--muted);border-color:rgba(166,191,179,.3)}
 .note-tag.tag-input{background:rgba(70,210,255,.12);color:#7fdcff;border-color:rgba(70,210,255,.3)}
+.fixes{margin:12px 0 4px;border:1px solid var(--line);border-radius:10px;padding:14px 16px;background:rgba(27,232,159,.04)}
+.fixes-head{display:block;font-size:10px;letter-spacing:.1em;color:var(--emerald);margin-bottom:10px}
+.fix{padding:8px 0;border-top:1px solid rgba(255,255,255,.05)}
+.fix:first-of-type{border-top:none}
+.fix p{margin:0}
+.fix-n{display:inline-block;width:16px;height:16px;line-height:16px;text-align:center;font-size:10px;border:1px solid var(--line);border-radius:4px;color:var(--emerald);margin-right:4px}
+.fix-line strong{color:#fff;font-weight:500}
+.fix-amt{font-size:11.5px;color:var(--emerald);margin-left:6px}
+.fix-body{color:var(--muted);font-size:13.5px;margin-top:3px}
+.fix-body em{color:#8fa89c;font-style:normal}
+.fix-fx{font-size:10.5px;margin-top:5px;letter-spacing:.02em}
+.fix-fx.ok{color:var(--emerald);opacity:.85}
+.fix-fx.conf{color:var(--flag);opacity:.85}
 .foot{padding:22px 34px 26px;border-top:1px solid var(--line)}
 .foot p{font-size:11.5px;line-height:1.6;color:#7A8F85}
 .sig{margin-top:14px;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted)}
@@ -165,6 +191,7 @@ export function buildEmailText(order, result) {
     ``,
     `Result: ${summary.pass} pass, ${summary.flag} flag(s), ${summary.review} to review${summary.needsInput ? `, ${summary.needsInput} needing a number from you` : ''}.`,
     ``,
+    ...(summary.flag ? [`Each flag comes with verified fix options — what to change, by how much, and what each fix affects — checked against your full ruleset.`, ``] : []),
     `Your full report (every requirement, cited to code, with what to change) is attached / below.`,
     ``,
     `Made changes after reading it? Re-check your revised plans for $39 (returning-customer rate): https://buy.stripe.com/14A8wP1fw3MY4e85kw9EI02`,

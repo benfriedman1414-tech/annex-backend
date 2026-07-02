@@ -56,6 +56,14 @@ export const config = {
     apiKey: env('ANTHROPIC_API_KEY'),
     model: env('VISION_MODEL', 'claude-opus-4-8'),
   },
+  // Remediation pass — model-proposed, engine-verified fix options for every FLAG.
+  // Shares ANTHROPIC_API_KEY; without it, flags still get the deterministic
+  // verified baseline fix (meet-the-threshold), just not the richer options.
+  remediation: {
+    apiKey: env('ANTHROPIC_API_KEY'),
+    model: env('REMEDIATION_MODEL', 'claude-fable-5'),
+    fallbackModel: env('REMEDIATION_FALLBACK_MODEL', 'claude-opus-4-8'),
+  },
   reportsDir: path.resolve(root, env('REPORTS_DIR', './reports')),
   pollSeconds: Number(env('POLL_SECONDS', '120')) || 120,
 };

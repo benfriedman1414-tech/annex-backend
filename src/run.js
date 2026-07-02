@@ -10,6 +10,7 @@ import { evaluateOrder } from './rules.js';
 import { buildReportHtml, buildEmailText } from './report.js';
 import { sendReportEmail, emailEnabled } from './email.js';
 import { extractFromPhoto, visionEnabled, buildExtractionNotes, normalizePhoto } from './vision.js';
+import { remediateOrder } from './remediate.js';
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
@@ -85,6 +86,14 @@ async function processOnce() {
     const order = normalizeOrder(rec);
     try {
       const result = evaluateOrder(rules, order);
+      // Remediation pass: attach verified fix options to every FLAG row.
+      // Best-effort — a remediation failure never blocks the report.
+      try {
+        const rem = await remediateOrder(rules, order, result);
+        if (rem.flags) log(`  ↳ remediation: ${rem.options} verified fix option(s) for ${rem.flags} flag(s)${rem.model ? ` · ${rem.model}` : ' · deterministic only'}`);
+      } catch (e) {
+        log(`  ↳ remediation skipped (${e.message})`);
+      }
       const html = buildReportHtml(order, result);
 
       const safeName = (order.name || order.id).replace(/[^a-z0-9]+/gi, '-').toLowerCase();
