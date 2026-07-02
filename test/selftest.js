@@ -7,6 +7,8 @@ import { normalizeOrder } from '../src/parse.js';
 import { evaluateOrder, STATUS } from '../src/rules.js';
 import { buildReportHtml } from '../src/report.js';
 import { buildExtractionNotes } from '../src/vision.js';
+import { remediateOrder, simulateFix } from '../src/remediate.js';
+import { config } from '../src/config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const outDir = path.resolve(__dirname, '..', 'reports');
@@ -111,6 +113,26 @@ const r4 = evaluateOrder(RULES, fromPhoto);
 const side4 = r4.rows.find((r) => /side setback/i.test(r.requirement));
 assert(side4 && side4.status === STATUS.FLAG, 'photo-derived order FLAGs the 3 ft side setback');
 assert(notes.includes('Confirm before running the check: sideSetbackFt, distanceFt'), 'notes list the fields to confirm with the homeowner');
+
+// ── Test 5: remediation pass — verified fix options on every flag ──
+divider('TEST 5 — remediation: flags get verified fix options (offline, deterministic path)');
+config.remediation.apiKey = ''; // force the no-model path: this test must never hit the network
+const sim = simulateFix(RULES, structured, 'sideSetbackFt', 4);
+assert(sim.clears('Side setback'), 'simulateFix: side setback 3→4 ft provably clears the flag');
+assert(sim.newFlags.length === 0, 'simulateFix: the 4 ft fix introduces no new flags');
+assert(sim.changes.length === 1 && sim.changes[0].requirement === 'Side setback', 'simulateFix: no other checks change');
+const rem = await remediateOrder(RULES, structured, r1);
+assert(rem.flags === 1 && rem.model === null, 'remediateOrder ran deterministically on 1 flag (no API key)');
+const sideFix = r1.rows.find((r) => /side setback/i.test(r.requirement));
+assert(Array.isArray(sideFix.fixes) && sideFix.fixes.length >= 1, 'flagged row carries at least one fix option');
+const opt = sideFix.fixes[0];
+assert(opt.verified === true, 'the baseline fix option is engine-verified');
+assert(opt.metric === 'sideSetbackFt' && opt.proposedValue === 4, 'baseline proposes exactly the 4 ft threshold');
+assert(/3 ft → 4 ft/.test(opt.amount), `amount label shows what to change and by how much ("${opt.amount}")`);
+assert(/no other checks affected/i.test(opt.effects), 'effects state the fix touches nothing else (verified)');
+const remHtml = buildReportHtml(structured, r1);
+assert(remHtml.includes('FIX OPTIONS — VERIFIED AGAINST YOUR FULL CHECK'), 'report renders the verified fix-options block');
+assert(remHtml.includes('3 ft → 4 ft'), 'report shows the concrete change amount');
 
 // ── Write a sample report so we can eyeball the design ──
 fs.mkdirSync(outDir, { recursive: true });
