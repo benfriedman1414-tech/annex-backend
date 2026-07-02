@@ -134,6 +134,21 @@ const remHtml = buildReportHtml(structured, r1);
 assert(remHtml.includes('FIX OPTIONS — VERIFIED AGAINST YOUR FULL CHECK'), 'report renders the verified fix-options block');
 assert(remHtml.includes('3 ft → 4 ft'), 'report shows the concrete change amount');
 
+// ── Test 6: payment linkage — flag-only, fail-safe ──
+divider('TEST 6 — payment linkage: session index + flags (never blocks)');
+const { buildSessionIndex, paymentFlag } = await import('../src/payment.js');
+const ORDERS = [
+  { id: 'recA', fields: { Name: 'Paid A', 'Stripe session': 'cs_live_AAA' } },
+  { id: 'recB', fields: { Name: 'Reuser', 'Stripe session': 'cs_live_AAA' } },
+  { id: 'recC', fields: { Name: 'No Session', Concerns: 'whatever' } },
+];
+const idx = buildSessionIndex(ORDERS);
+assert(idx.get('cs_live_AAA').length === 2, 'session index counts both holders of a session');
+assert(paymentFlag({ session: 'cs_live_AAA', orderId: 'recB', index: idx }).includes('DUPLICATE'), 'reused session is flagged as duplicate');
+assert(paymentFlag({ session: 'cs_live_ZZZ', orderId: 'recX', index: idx }) === '', 'a fresh unique session passes clean');
+assert(paymentFlag({ session: '', orderId: 'recC', index: idx }).includes('NO Stripe session'), 'missing session is flagged once the funnel is armed');
+assert(paymentFlag({ session: '', orderId: 'recC', index: buildSessionIndex([]) }) === '', 'missing session is NOT flagged before any session has ever been seen (unarmed = quiet)');
+
 // ── Write a sample report so we can eyeball the design ──
 fs.mkdirSync(outDir, { recursive: true });
 const sampleFile = path.join(outDir, 'SAMPLE-report.html');
