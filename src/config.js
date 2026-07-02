@@ -65,8 +65,10 @@ export const config = {
     fallbackModel: env('REMEDIATION_FALLBACK_MODEL', 'claude-opus-4-8'),
   },
   // Flow notifications (photo acks + owner action/anomaly alerts).
+  // Owner alerts go to the real inbox, NOT hello@ — sending from hello@ TO
+  // hello@ trips ImprovMX's self-forward loop protection and gets dropped.
   notify: {
-    owner: env('OWNER_EMAIL', 'hello@annexadu.com'),
+    owner: env('OWNER_EMAIL', 'benfriedman1414@gmail.com'),
   },
   reportsDir: path.resolve(root, env('REPORTS_DIR', './reports')),
   pollSeconds: Number(env('POLL_SECONDS', '120')) || 120,
