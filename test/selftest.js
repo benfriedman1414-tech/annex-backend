@@ -104,15 +104,19 @@ const fakeExtraction = {
 const notes = buildExtractionNotes(fakeExtraction, 'claude-opus-4-8');
 const fromPhoto = normalizeOrder({ id: 'recPHOTO1', fields: { Name: 'Plan Upload', 'ADU type': 'Detached', 'Extraction notes': notes } });
 console.log('  parsed-from-notes:', JSON.stringify({ adu: fromPhoto.aduSqft, bed: fromPhoto.bedrooms, ht: fromPhoto.heightFt, side: fromPhoto.sideSetbackFt, rear: fromPhoto.rearSetbackFt, lot: fromPhoto.lotSqft }));
-assert(fromPhoto.aduSqft === 812, 'extraction notes → ADU size 812 read by the parser');
-assert(fromPhoto.sideSetbackFt === 3, 'extraction notes → side setback 3 ft read by the parser');
-assert(Math.abs(fromPhoto.heightFt - 15.5) < 0.01, 'extraction notes → height 15.5 ft read by the parser');
-assert(fromPhoto.lotSqft === 6000, 'extraction notes → lot 6000 sq ft read by the parser');
+assert(fromPhoto.aduSqft === 812, 'extraction notes → ADU size 812 (high confidence) read by the parser');
+assert(Math.abs(fromPhoto.heightFt - 15.5) < 0.01, 'extraction notes → height 15.5 ft (high confidence) read by the parser');
+assert(fromPhoto.lotSqft === 6000, 'extraction notes → lot 6000 sq ft (medium confidence, unflagged) still used');
 assert(fromPhoto.bedrooms === 1, 'extraction notes → 1 bedroom read by the parser');
+// AUTO-mode safety: the LOW-confidence side setback must be EXCLUDED — the
+// engine asks for the number instead of risking a wrong verdict on a misread.
+assert(fromPhoto.sideSetbackFt === null, 'low-confidence side setback is EXCLUDED from the parseable line (never fed to the engine)');
 const r4 = evaluateOrder(RULES, fromPhoto);
 const side4 = r4.rows.find((r) => /side setback/i.test(r.requirement));
-assert(side4 && side4.status === STATUS.FLAG, 'photo-derived order FLAGs the 3 ft side setback');
-assert(notes.includes('Confirm before running the check: sideSetbackFt, distanceFt'), 'notes list the fields to confirm with the homeowner');
+assert(side4 && side4.status === STATUS.NEEDS_INPUT, 'unclear side setback → NEEDS INPUT (report asks the homeowner), never a wrong pass/flag');
+const rear4 = r4.rows.find((r) => /rear setback/i.test(r.requirement));
+assert(rear4 && rear4.status === STATUS.PASS, 'high-confidence rear setback (4 ft) still auto-PASSes');
+assert(/Not read clearly — excluded from the check/.test(notes) && notes.includes('sideSetbackFt'), 'notes record which unclear fields were excluded');
 
 // ── Test 5: remediation pass — verified fix options on every flag ──
 divider('TEST 5 — remediation: flags get verified fix options (offline, deterministic path)');
