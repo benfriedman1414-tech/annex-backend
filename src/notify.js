@@ -26,9 +26,9 @@ export async function sendPhotoAck({ name, email }) {
     '',
     `We've received your plans — your Annex ADU pre-check is underway.`,
     '',
-    `We're reading the dimensions off your drawings now. Your full report — every requirement cited to code, with verified fix options for anything flagged — will arrive at this address soon — typically within 2 hours. Nothing else is needed from you.`,
+    `We're reading the dimensions off your drawings now. Your full report — every requirement cited to code, with verified fix options for anything flagged — will arrive at this address shortly. Nothing else is needed from you.`,
     '',
-    `If we can't read a dimension clearly, we'll reply here to confirm it with you first (better a question than a wrong number).`,
+    `If any dimension isn't legible on your drawings, we never guess: your report will mark exactly which number to send us, and we'll re-run that check.`,
     '',
     '— Annex · annexadu.com',
   ].join('\n');

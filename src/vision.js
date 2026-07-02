@@ -155,7 +155,19 @@ export async function extractFromPhoto(attachment) {
   return toolUse.input;
 }
 
+// A field's value is USED by the engine only when the read is trustworthy:
+// high/medium confidence and not flagged by the model for confirmation.
+// Anything else is excluded — the engine then asks for that number (NEEDS
+// INPUT) instead of risking a wrong verdict from a misread. This is what
+// makes fully automatic photo processing safe.
+const usable = (x, k) => {
+  const f = x[k];
+  if (!f) return false;
+  if ((x.needsConfirmation || []).includes(k)) return false;
+  return f.confidence === 'high' || f.confidence === 'medium';
+};
 const num = (x, k) => {
+  if (!usable(x, k)) return null;
   const v = x[k] && x[k].value;
   return typeof v === 'number' && !Number.isNaN(v) ? v : null;
 };
@@ -187,11 +199,19 @@ export function buildExtractionNotes(x, model) {
   const lines = Object.keys(LABELS).map((k) => {
     const f = x[k];
     if (!f) return null;
+    // Excluded (unclear) reads must not print their numeral at all — the
+    // parser regex-greps this whole text, so a printed value would leak back
+    // into the engine and defeat the exclusion.
+    if (f.value != null && !usable(x, k)) {
+      return `  ${LABELS[k]} — excluded, unclear read (${f.confidence})`;
+    }
     const v = f.value == null ? '—' : f.value;
     return `  ${LABELS[k]}: ${v} (${f.confidence})${f.note ? ` — ${f.note}` : ''}`;
   }).filter(Boolean);
 
   const confirm = (x.needsConfirmation || []);
+  // Fields we deliberately did NOT feed to the engine (unclear reads).
+  const excluded = Object.keys(LABELS).filter((k) => x[k] && x[k].value != null && !usable(x, k));
   const date = new Date().toISOString().slice(0, 10);
   return [
     parseable,
@@ -201,8 +221,11 @@ export function buildExtractionNotes(x, model) {
     x.readable === false ? 'NOTE: image was not legible enough to read reliably — homeowner should re-upload or type the numbers.' : '',
     'Fields read (value · confidence):',
     ...lines,
+    excluded.length
+      ? `Not read clearly — excluded from the check (report asks the homeowner for these): ${excluded.join(', ')}`
+      : '',
     confirm.length
-      ? `Confirm before running the check: ${confirm.join(', ')}`
-      : 'All fields read at high confidence — review and confirm.',
+      ? `Model flagged for confirmation: ${confirm.join(', ')}`
+      : 'All fields read at high confidence.',
   ].filter((s) => s !== '').join('\n');
 }

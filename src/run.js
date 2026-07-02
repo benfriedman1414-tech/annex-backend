@@ -65,35 +65,56 @@ async function processOnce() {
         } catch (e) { log(`  (notify failed: ${e.message})`); }
         continue;
       }
+      // AUTO mode: read the photo and run the check immediately — no human
+      // hold. Safety: vision only feeds the engine values it read reliably
+      // (see vision.js `usable`); unclear reads become NEEDS INPUT rows in
+      // the report instead of wrong verdicts. Illegible uploads still hold.
       try {
         await updateOrderStatus(rec.id, config.airtable.readingStatus);
         const extraction = await extractFromPhoto(photo);
         const notes = buildExtractionNotes(extraction, config.vision.model);
+        // Persist the extraction for the record (tolerate a missing column).
+        let notesField = config.airtable.notesField;
         try {
-          await updateOrderStatus(rec.id, config.airtable.needsConfirmationStatus, { [config.airtable.notesField]: notes });
+          await updateOrderFields(rec.id, { [notesField]: notes });
         } catch (e) {
-          // "Extraction notes" column not added yet → fall back to the free-text details box.
           if (/unknown field/i.test(e.message)) {
-            const detailsField = pickDetailsField(f);
-            const existing = (f[detailsField] || '').toString();
-            await updateOrderStatus(rec.id, config.airtable.needsConfirmationStatus, { [detailsField]: existing ? `${existing}\n\n${notes}` : notes });
-            log(`  (note: "${config.airtable.notesField}" field missing — wrote extraction into "${detailsField}")`);
+            notesField = pickDetailsField(f);
+            const existing = (f[notesField] || '').toString();
+            await updateOrderFields(rec.id, { [notesField]: existing ? `${existing}\n\n${notes}` : notes });
+            log(`  (note: "${config.airtable.notesField}" field missing — wrote extraction into "${notesField}")`);
           } else throw e;
         }
-        const flagged = extraction.needsConfirmation || [];
-        log(`✎ ${orderName}: read ${extraction.documentType} → ${config.airtable.needsConfirmationStatus}${flagged.length ? ` · confirm: ${flagged.join(', ')}` : ' · read cleanly'}`);
+        if (extraction.readable === false) {
+          // Failure path only: an unreadable image can't produce a useful
+          // report — hold it and tell the owner to follow up.
+          await updateOrderStatus(rec.id, config.airtable.needsConfirmationStatus);
+          try {
+            await sendOwnerAlert(`Action needed: illegible plan photo on "${orderName}"`, [
+              `Order ${rec.id} (${f.Email || 'no email'}) uploaded a plan photo that couldn't be read reliably.`,
+              'Ask the customer to re-upload a clearer image or type their numbers, then set Status to "' + config.airtable.confirmedStatus + '".',
+            ]);
+          } catch (e) { log(`  (notify failed: ${e.message})`); }
+          log(`✗ ${orderName}: photo illegible → ${config.airtable.needsConfirmationStatus} (owner alerted)`);
+          continue;
+        }
+        // Feed the extraction to the engine in THIS pass.
+        f[notesField] = f[notesField] ? `${f[notesField]}\n\n${notes}` : notes;
+        const excluded = (extraction.needsConfirmation || []);
+        log(`✎ ${orderName}: read ${extraction.documentType} → auto-processing${excluded.length ? ` · unclear (excluded): ${excluded.join(', ')}` : ' · read cleanly'}`);
         try {
           await sendPhotoAck({ name: f.Name, email: f.Email });
-          await sendOwnerAlert(`Action needed: confirm reading for "${orderName}"`, [
-            `Order ${rec.id} (${f.Email || 'no email'}) — plan photo auto-read, awaiting your confirmation.`,
-            flagged.length ? `Fields to double-check: ${flagged.join(', ')}` : 'All fields read at high confidence.',
-            `Review the extraction in Airtable, then set Status to "${config.airtable.confirmedStatus}".`,
+          await sendOwnerAlert(`FYI: photo order auto-processed — "${orderName}"`, [
+            `Order ${rec.id} (${f.Email || 'no email'}) — plan photo read and checked automatically. No action needed.`,
+            extraction.summary || '',
+            excluded.length ? `Unclear reads excluded from the check (report asks the customer): ${excluded.join(', ')}` : 'All fields read cleanly.',
           ]);
         } catch (e) { log(`  (notify failed: ${e.message})`); }
+        // NO `continue` — fall through to the rules engine below.
       } catch (err) {
         log(`✗ ${orderName}: plan-photo read failed (${err.message}) — left at "${config.airtable.readingStatus}". Reset Status to re-try.`);
+        continue;
       }
-      continue;
     }
 
     // Orders still awaiting human confirmation (or mid-read) are not checked yet.
