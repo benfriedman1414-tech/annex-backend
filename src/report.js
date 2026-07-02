@@ -171,7 +171,7 @@ td.val{color:var(--mist)}
   ${reviewHtml}
   <div class="recheck">
     <h3>Made changes? Re-check for $39</h3>
-    <p>Once you've revised your plans to clear the items above, submit the updated set and we'll re-run the full pre-check &mdash; cited report in 24 hours, at the returning-customer rate.</p>
+    <p>Once you've revised your plans to clear the items above, submit the updated set and we'll re-run the full pre-check &mdash; cited report typically within 2 hours, at the returning-customer rate.</p>
     <a href="https://buy.stripe.com/14A8wP1fw3MY4e85kw9EI02">Re-check my plans &mdash; $39</a>
   </div>
   <div class="foot">
