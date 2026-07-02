@@ -1,4 +1,4 @@
-// Annex backend — main runner.
+// Annex backend — main runner. (flow: photo ack + owner alerts + payment flag)
 //   node src/run.js          process all pending orders once
 //   node src/run.js --watch  keep polling Airtable for new orders
 import fs from 'node:fs';
