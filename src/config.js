@@ -72,6 +72,37 @@ export const config = {
   },
   reportsDir: path.resolve(root, env('REPORTS_DIR', './reports')),
   pollSeconds: Number(env('POLL_SECONDS', '120')) || 120,
+  // ── Freemium flow (free summary → paid unlock) ─────────────
+  // Orders that carry a "Client token" (set by the public /precheck form) are
+  // freemium: they get a FREE on-page teaser summary, and the full report only
+  // after a VERIFIED Stripe payment. Orders without a token are legacy
+  // (paid-first / manually created) and process exactly as before.
+  freemium: {
+    tokenField: env('ORDERS_TOKEN_FIELD', 'Client token'),
+    sessionField: env('ORDERS_SESSION_FIELD', 'Stripe session'),
+    newStatus: env('ORDERS_NEW_STATUS', ''),
+    summaryReadyStatus: env('ORDERS_SUMMARY_READY_STATUS', 'Summary ready'),
+    summarySentStatus: env('ORDERS_SUMMARY_SENT_STATUS', 'Summary sent'),
+    paidStatus: env('ORDERS_PAID_STATUS', 'Paid'),
+    generatingStatus: env('ORDERS_GENERATING_STATUS', 'Generating report'),
+    teaserDelayMin: Number(env('TEASER_DELAY_MIN', '10')) || 10,     // never opened the summary page
+    reminderDelayMin: Number(env('REMINDER_DELAY_MIN', '45')) || 45, // saw summary, didn't pay
+  },
+  // Stripe payment VERIFICATION (restricted key, checkout-sessions read only).
+  // unlockLink = the $99 Payment Link; the unlock CTA appends
+  // ?client_reference_id=<token>&prefilled_email=<email>.
+  stripe: {
+    apiKey: env('STRIPE_API_KEY'),
+    unlockLink: env('STRIPE_UNLOCK_LINK', 'https://buy.stripe.com/fZu00j6zQ1EQ5icbIU9EI00'),
+  },
+  // The public summary/unlock API (src/server.js). The worker pings /api/health
+  // each poll to keep the free-tier service warm; the Softr page calls it live.
+  api: {
+    port: Number(env('PORT', '10000')) || 10000,
+    url: env('API_URL', ''), // e.g. https://annex-api.onrender.com (worker keep-warm)
+    corsOrigins: env('CORS_ORIGINS', 'https://www.annexadu.com,https://annexadu.com,https://destiny36400.softr.app')
+      .split(',').map((s) => s.trim()).filter(Boolean),
+  },
 };
 
 export function assertAirtableConfigured() {

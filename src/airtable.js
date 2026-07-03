@@ -68,6 +68,20 @@ export async function fetchPendingOrders() {
   return filterPending(await fetchAllOrders());
 }
 
+// Find a single order by an exact field value (used for the freemium
+// "Client token" and the Stripe-session anti-replay check).
+export async function findOrderByField(fieldName, value) {
+  const url = new URL(`${API}/${config.airtable.baseId}/${encodeURIComponent(config.airtable.ordersTable)}`);
+  // Escape double quotes for filterByFormula's string literal.
+  const safe = String(value).replace(/"/g, '\\"');
+  url.searchParams.set('filterByFormula', `{${fieldName}}="${safe}"`);
+  url.searchParams.set('maxRecords', '2');
+  const res = await fetch(url, { headers: headers() });
+  if (!res.ok) throw new Error(`Airtable lookup failed: ${res.status} ${await res.text()}`);
+  const data = await res.json();
+  return (data.records || [])[0] || null;
+}
+
 export async function updateOrderStatus(recordId, status, extraFields = {}) {
   const url = `${API}/${config.airtable.baseId}/${encodeURIComponent(config.airtable.ordersTable)}/${recordId}`;
   const res = await fetch(url, {

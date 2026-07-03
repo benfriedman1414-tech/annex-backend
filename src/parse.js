@@ -123,6 +123,9 @@ export function normalizeOrder(record) {
     // Stripe Checkout session carried through the payment-link redirect ->
     // hidden form field. Used only to FLAG suspicious orders, never to block.
     stripeSession: (f['Stripe session'] ?? f['Stripe session id'] ?? f['session_id'] ?? '').toString().trim(),
+    // Freemium: uuid the public form stamps on the order; presence of a token
+    // means the full report is gated behind a verified payment.
+    clientToken: (f['Client token'] ?? '').toString().trim(),
     city,
     county,
     address: f['Address'] || '',
