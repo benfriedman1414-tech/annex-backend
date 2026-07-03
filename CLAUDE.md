@@ -7,10 +7,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Annex is the backend engine for an ADU (Accessory Dwelling Unit) plan pre-check service. It reads homeowner "orders" from Airtable, checks each order's measurements against a table of cited zoning rules (also in Airtable), produces a self-contained HTML report flagging compliance problems, optionally emails it, and marks the order done so it isn't processed twice.
 
 ```
-Softr /start form ──▶ Airtable "Orders" ──▶ THIS backend ──▶ cited HTML report ──▶ customer
-                                                │
+Softr /precheck form ──▶ Airtable "Orders" ──▶ THIS backend ──▶ free teaser summary ──▶ paid unlock ──▶ cited HTML report
+                                                │                                (Stripe verify)
                                         Airtable "Rules" (the cited rules, edited live in the base)
 ```
+
+## Freemium flow (two services from this repo)
+
+- **`node src/run.js --watch`** — the poll WORKER (Render background worker): legacy orders, teaser emails to abandoners, Stripe session sweep, stale-generate reclaim.
+- **`node src/server.js`** — the public API (Render web service `annex-api`, free tier): `GET /api/summary?token=` (on-demand engine run + vision; returns teaser COUNTS + flag categories only — never citations/thresholds/fixes) and `POST /api/unlock` (verifies a Stripe Checkout session via a RESTRICTED read-only key, marks Paid, generates + emails the full report in-process).
+- **Discriminator:** orders WITH a "Client token" field are freemium (full report gated on `Paid`); orders WITHOUT are legacy (processed immediately). The Softr form fills the hidden token field from the `?token` URL parameter, which the page footer JS plants via `history.replaceState`.
+- **Status lifecycle (freemium):** New → `Summary ready` (page saw the teaser) → `Summary sent` (teaser email to abandoner) → `Paid` → `Generating report` (API in-flight) → `Report ready/sent`. `decideFreemiumStep()` in summary.js is the pure decision function; the teaser builder is `buildTeaser()` (leak-tested in selftest TEST 7).
+- **Shared pipeline:** `src/pipeline.js` (`generateAndSendReport`, `readPhotoIfNeeded`) is used by BOTH entry points — change report behavior there, not in run.js/server.js.
 
 ## Commands
 
