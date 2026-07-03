@@ -1,5 +1,6 @@
-# Render.com blueprint — deploy as an always-on background worker.
-# (Also a useful reference for Railway / Fly.io: same start command + env vars.)
+# Render.com blueprint — two services from this repo:
+#   annex-backend  (worker)  poll loop: reads orders, emails teasers/reports, Stripe sweep
+#   annex-api      (web)     public freemium API: on-page summary + paid unlock (src/server.js)
 services:
   - type: worker
     name: annex-backend
@@ -9,7 +10,7 @@ services:
     startCommand: node src/run.js --watch
     envVars:
       - key: AIRTABLE_API_KEY
-        sync: false            # paste this in the Render dashboard (kept secret)
+        sync: false            # set in the Render dashboard (kept secret)
       - key: AIRTABLE_BASE_ID
         value: appaa8u2MVRT4obQP
       - key: AIRTABLE_RULES_TABLE
@@ -20,5 +21,34 @@ services:
         sync: false            # optional — leave unset to skip auto-email
       - key: FROM_EMAIL
         sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false            # photo reading + remediation (managed in dashboard)
+      - key: STRIPE_API_KEY
+        sync: false            # RESTRICTED key (checkout sessions: read) — dashboard only
+      - key: API_URL
+        value: https://annex-api.onrender.com   # keep-warm ping target
       - key: POLL_SECONDS
         value: "120"
+  - type: web
+    name: annex-api
+    runtime: node
+    plan: free
+    buildCommand: ""
+    startCommand: node src/server.js
+    envVars:
+      - key: AIRTABLE_API_KEY
+        sync: false
+      - key: AIRTABLE_BASE_ID
+        value: appaa8u2MVRT4obQP
+      - key: AIRTABLE_RULES_TABLE
+        value: Rules
+      - key: AIRTABLE_ORDERS_TABLE
+        value: Orders
+      - key: RESEND_API_KEY
+        sync: false
+      - key: FROM_EMAIL
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: STRIPE_API_KEY
+        sync: false
