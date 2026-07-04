@@ -75,6 +75,7 @@ assert(freeText.bedrooms === 1, 'parsed 1 bedroom from free text');
 assert(Math.abs(freeText.heightFt - 15.5) < 0.01, "parsed height 15'6\" -> 15.5 ft from free text");
 assert(freeText.sideSetbackFt === 3, 'parsed side setback 3 ft from free text');
 assert(freeText.aduType === 'Detached', 'parsed ADU type Detached from free text');
+assert(freeText.city === 'Walnut Creek', `free-text city extracted ("${freeText.city}")`);
 const r2 = evaluateOrder(RULES, freeText);
 showRows(r2);
 const side2 = r2.rows.find((r) => /side setback/i.test(r.requirement));
