@@ -100,7 +100,19 @@ export function normalizeOrder(record) {
   else if (/no|false|not/i.test(nearTransitRaw)) nearTransit = false;
   else if (/near transit|by transit|half mile|1\/2 mile|bus stop|bart|rail/i.test(free)) nearTransit = true;
 
-  const city = f['City'] || grab(free, [/in ([a-z ]+?)(?:,|\.|$)/]) || '';
+  // City: explicit field first; else find a KNOWN city name in the free text.
+  // (grab() coerces to Number, so it can never return a city name — matching
+  // against the CITY_COUNTY keys also avoids false positives like "in the unit".)
+  let city = (f['City'] || '').toString().trim();
+  if (!city) {
+    const hay = free.toLowerCase();
+    for (const k of Object.keys(CITY_COUNTY)) {
+      if (new RegExp(`\\b${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(hay)) {
+        city = k.replace(/(^|\s)[a-z]/g, (c) => c.toUpperCase());
+        break;
+      }
+    }
+  }
   const county = deriveCounty(f['County'], city, free);
 
   // ADU floor area: prefer the structured field, then ADU-adjacent phrasings.
