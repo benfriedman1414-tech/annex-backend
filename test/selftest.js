@@ -153,6 +153,67 @@ assert(paymentFlag({ session: 'cs_live_ZZZ', orderId: 'recX', index: idx }) === 
 assert(paymentFlag({ session: '', orderId: 'recC', index: idx }).includes('NO Stripe session'), 'missing session is flagged once the funnel is armed');
 assert(paymentFlag({ session: '', orderId: 'recC', index: buildSessionIndex([]) }) === '', 'missing session is NOT flagged before any session has ever been seen (unarmed = quiet)');
 
+// ── Test 7: freemium — teaser withholds the product, lifecycle gates correctly ──
+divider('TEST 7 — freemium: teaser content + lifecycle decisions + stripe shapes');
+const { buildTeaser, decideFreemiumStep, maskEmail } = await import('../src/summary.js');
+const teaser = buildTeaser(structured, r1);
+assert(teaser.checked === r1.summary.total && teaser.flag === 1 && teaser.pass === r1.summary.pass, 'teaser counts mirror the engine summary');
+assert(teaser.flagged.length === 1 && /side setback/i.test(teaser.flagged[0].category), 'flag category names the metric ("side setback")');
+const teaserJson = JSON.stringify(teaser);
+assert(!/66314|Gov\. Code|§/.test(teaserJson), 'teaser leaks NO citations');
+assert(!/4 ?ft|>=|<=/.test(teaserJson), 'teaser leaks NO thresholds');
+assert(!teaserJson.includes('"3'), 'teaser leaks NO customer values');
+assert(!/fix|shift the structure/i.test(teaserJson), 'teaser leaks NO fix text');
+assert(teaser.seriousNote && /state-law minimum/.test(teaser.seriousNote), 'state-law flag produces the factual severity note');
+assert(maskEmail('ben@x.com') === 'b•••@x.com', 'email masking works');
+const FCFG = config.freemium;
+assert(decideFreemiumStep({ status: '', ageMin: 2 }, FCFG) === 'wait', 'fresh unopened order: wait (page may still load it)');
+assert(decideFreemiumStep({ status: '', ageMin: 15 }, FCFG) === 'summarize-email', 'unopened after 10 min: compute + email the teaser');
+assert(decideFreemiumStep({ status: FCFG.summaryReadyStatus, ageMin: 20 }, FCFG) === 'wait', 'saw summary 20 min ago: not yet');
+assert(decideFreemiumStep({ status: FCFG.summaryReadyStatus, ageMin: 50 }, FCFG) === 'remind', 'saw summary 50 min ago, unpaid: reminder email');
+assert(decideFreemiumStep({ status: FCFG.summarySentStatus, ageMin: 500 }, FCFG) === 'wait', 'already reminded: never nag twice');
+assert(decideFreemiumStep({ status: FCFG.paidStatus, ageMin: 1 }, FCFG) === 'process', 'Paid: full report pipeline');
+assert(decideFreemiumStep({ status: FCFG.generatingStatus, ageMin: 9, generatingSeen: 1 }, FCFG) === 'wait', 'API mid-generate: hands off');
+assert(decideFreemiumStep({ status: FCFG.generatingStatus, ageMin: 60, generatingSeen: 6 }, FCFG) === 'process', 'stale Generating (5+ polls): worker reclaims');
+const { isSessionIdShaped, sessionPaid } = await import('../src/stripe.js');
+assert(isSessionIdShaped('cs_live_a1B2c3D4e5F6g7H8'), 'real-shaped session id accepted');
+assert(!isSessionIdShaped('cs_live_x; DROP TABLE') && !isSessionIdShaped('foo'), 'malformed session ids rejected');
+assert(sessionPaid({ status: 'complete', payment_status: 'paid' }), 'complete+paid session verifies');
+assert(sessionPaid({ status: 'complete', payment_status: 'no_payment_required' }), '100%-promo ($0) session verifies');
+assert(!sessionPaid({ status: 'complete', payment_status: 'unpaid' }), 'unpaid session rejected');
+assert(!sessionPaid({ status: 'open', payment_status: 'paid' }), 'incomplete session rejected');
+
+// ── Test 8: city-rules pipeline — jurisdiction match + safety gates ──
+divider('TEST 8 — city rules: jurisdiction routing, Pending gate, preemption clamp, markers');
+// structured order is Walnut Creek, Contra Costa County (side setback 3 ft).
+const CITY_RULES = [
+  // Verified city rule for the ORDER's city — should evaluate numerically (FLAG at 900 < 812? no: <= 900 passes 812).
+  { requirement: 'Unit size - city maximum', appliesTo: ['Detached'], rule: 'Local max floor area.', threshold: '<= 900 sq ft', citation: 'Walnut Creek Mun. Code §10-2.3.204', fix: 'Reduce floor area.', jurisdiction: 'City of Walnut Creek', verification: 'Verified' },
+  // Same rule for a DIFFERENT city — must not apply at all.
+  { requirement: 'Unit size - city maximum', appliesTo: ['Detached'], rule: 'Local max floor area.', threshold: '<= 700 sq ft', citation: 'Concord Mun. Code §18.200.180', fix: '', jurisdiction: 'City of Concord', verification: 'Verified' },
+  // PENDING city rule that would numerically FLAG (850 < 812 is false → would PASS; use <= 800 so it would FLAG) — must be forced to REVIEW.
+  { requirement: 'Lot coverage - city cap', appliesTo: ['Detached'], rule: 'City caps ADU size on small lots.', threshold: '<= 800 sq ft', citation: 'Walnut Creek Mun. Code §10-2.3.205', fix: '', jurisdiction: 'City of Walnut Creek', verification: 'Pending' },
+  // Verified but PREEMPTED: city demands a 5 ft side setback; state caps what cities may require at 4 ft.
+  { requirement: 'Side setback - city standard', appliesTo: ['Detached'], rule: 'City requires a larger side yard.', threshold: '>= 5 ft', citation: 'Walnut Creek Mun. Code §10-2.3.206', fix: '', jurisdiction: 'City of Walnut Creek', verification: 'Verified' },
+  // Bookkeeping rows — must never evaluate.
+  { requirement: 'City research: Walnut Creek', rule: 'sources…', threshold: '', citation: '', fix: '', jurisdiction: 'City of Walnut Creek', verification: 'Marker' },
+  { requirement: 'Height - old city limit', appliesTo: ['Detached'], rule: 'Superseded by state law.', threshold: '<= 14 ft', citation: 'Walnut Creek Mun. Code (pre-2020)', fix: '', jurisdiction: 'City of Walnut Creek', verification: 'Superseded' },
+];
+const r8 = evaluateOrder(RULES.concat(CITY_RULES), structured);
+const cityMax = r8.rows.filter((r) => /city maximum/i.test(r.requirement));
+assert(cityMax.length === 1 && /Walnut Creek/.test(cityMax[0].citation), 'only the ORDER city\'s rule applies (Concord\'s is skipped)');
+assert(cityMax[0].status === STATUS.PASS && cityMax[0].yourValue === '812 sq ft', 'a VERIFIED city rule evaluates numerically (812 ≤ 900 → PASS)');
+const pend = r8.rows.find((r) => /city cap/i.test(r.requirement));
+assert(pend && pend.status === STATUS.REVIEW, 'a PENDING city rule can only ever REVIEW (812 vs ≤800 would have flagged)');
+assert(/pending Annex verification/i.test(pend.ruleText), 'pending rows carry the verification note in the report text');
+const clamp = r8.rows.find((r) => /side setback - city/i.test(r.requirement));
+assert(clamp && clamp.status === STATUS.REVIEW, 'a local setback demand above the 4 ft state cap is clamped to REVIEW (never FLAG)');
+assert(/state law controls/i.test(clamp.ruleText), 'the clamp explains that state law controls');
+assert(!r8.rows.some((r) => /City research:|old city limit/i.test(r.requirement)), 'Marker and Superseded rows never evaluate');
+const wrongCity = evaluateOrder(RULES.concat(CITY_RULES), normalizeOrder({ id: 'recX', fields: { Name: 'Elsewhere', City: 'Concord', 'ADU type': 'Detached', 'ADU sqft': 812, Bedrooms: 1 } }));
+const ccMax = wrongCity.rows.filter((r) => /city maximum/i.test(r.requirement));
+assert(ccMax.length === 1 && /Concord/.test(ccMax[0].citation) && ccMax[0].status === STATUS.FLAG, 'a Concord order gets CONCORD\'s rule (812 > 700 → FLAG)');
+
 // ── Write a sample report so we can eyeball the design ──
 fs.mkdirSync(outDir, { recursive: true });
 const sampleFile = path.join(outDir, 'SAMPLE-report.html');
