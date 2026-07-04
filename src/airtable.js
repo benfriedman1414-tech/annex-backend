@@ -42,8 +42,40 @@ export async function fetchRules() {
       threshold: pick(f, ['Threshold', 'Limit', 'Value', 'Standard']) || '',
       citation: pick(f, ['Code citation', 'Citation', 'Code', 'Source']) || '',
       fix: pick(f, ['Common fix', 'Fix', 'How to fix', 'Remedy']) || '',
+      // City-rules pipeline: explicit jurisdiction ("State" / "X County" /
+      // "City of Y"), verification state (Pending/Verified/Superseded/Marker;
+      // blank = grandfathered-verified), and the research date stamp.
+      jurisdiction: pick(f, ['Jurisdiction']) || '',
+      verification: pick(f, ['Verification']) || '',
+      lastChecked: pick(f, ['Last checked']) || '',
     };
   }).filter((r) => r.requirement);
+}
+
+// Create rule rows (the city-research drafter). Airtable caps 10 per request.
+export async function createRules(rows) {
+  const url = `${API}/${config.airtable.baseId}/${encodeURIComponent(config.airtable.rulesTable)}`;
+  for (let i = 0; i < rows.length; i += 10) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({ typecast: true, records: rows.slice(i, i + 10).map((fields) => ({ fields })) }),
+    });
+    if (!res.ok) throw new Error(`Airtable rules create failed: ${res.status} ${await res.text()}`);
+  }
+  return rows.length;
+}
+
+// Patch fields on a Rules row (e.g. the coverage marker's "Last checked").
+export async function updateRuleFields(recordId, fields) {
+  const url = `${API}/${config.airtable.baseId}/${encodeURIComponent(config.airtable.rulesTable)}/${recordId}`;
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: headers(),
+    body: JSON.stringify({ typecast: true, fields }),
+  });
+  if (!res.ok) throw new Error(`Airtable rule update failed: ${res.status} ${await res.text()}`);
+  return res.json();
 }
 
 // Every order record (used for the payment-session index) — one fetch that

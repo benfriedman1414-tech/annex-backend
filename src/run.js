@@ -20,6 +20,7 @@ import { sendPhotoAck, sendOwnerAlert, sendTeaserEmail } from './notify.js';
 import { buildSessionIndex, paymentFlag } from './payment.js';
 import { stripeEnabled, listRecentSessions, sessionPaid } from './stripe.js';
 import { updateOrderFields } from './airtable.js';
+import { ensureCityCoverage, refreshStaleCities } from './cityrules.js';
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
@@ -192,6 +193,13 @@ async function processOnce() {
       log(`✗ ${orderName}: ${err.message}`);
     }
   }
+
+  // ── City-rules research (AFTER all orders, so it never delays a report) ──
+  // New city seen in an order → one research job drafts Pending rules + a
+  // coverage marker; stale cities get a ~90-day drift re-check (alert-only).
+  try { await ensureCityCoverage(allOrders, rules, log); } catch (e) { log(`(city coverage skipped: ${e.message})`); }
+  try { await refreshStaleCities(rules, log); } catch (e) { log(`(city refresh skipped: ${e.message})`); }
+
   return done;
 }
 
@@ -210,9 +218,16 @@ async function main() {
     return;
   }
   log(`Watch mode: polling every ${config.pollSeconds}s. Ctrl+C to stop.`);
+  // Re-entrancy guard: a slow pass (e.g. a 2-5 min city-research call) must
+  // not overlap the next interval tick — skip ticks while one is running.
+  let running = false;
   const tick = async () => {
-    await pingApi();
-    try { await processOnce(); } catch (e) { log('Error:', e.message); }
+    if (running) return;
+    running = true;
+    try {
+      await pingApi();
+      try { await processOnce(); } catch (e) { log('Error:', e.message); }
+    } finally { running = false; }
   };
   await tick();
   setInterval(tick, config.pollSeconds * 1000);

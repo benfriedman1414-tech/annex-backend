@@ -57,9 +57,32 @@ function ruleCounty(rule) {
 
 // Does this rule apply to this order (by jurisdiction, ADU type + bedroom context)?
 function ruleApplies(rule, order) {
-  // Jurisdiction: skip a county-specific rule when the order is in a different county.
-  const rc = ruleCounty(rule);
-  if (rc && lc(order.county) !== lc(rc)) return false;
+  // Bookkeeping rows from the city-research pipeline never evaluate:
+  // "Marker" records coverage; "Superseded" = state law overrides it.
+  const ver = lc(rule.verification);
+  if (ver === 'marker' || ver === 'superseded') return false;
+
+  // Jurisdiction: the explicit column wins ("State" / "X County" / "City of Y");
+  // blank rows keep the legacy citation-based county inference below.
+  const j = (rule.jurisdiction || '').trim();
+  if (j) {
+    const jl = lc(j);
+    if (jl !== 'state' && jl !== 'california') {
+      const cityM = jl.match(/^city of (.+)$/);
+      if (cityM) {
+        if (lc(order.city).trim() !== cityM[1].trim()) return false;
+      } else if (/county$/.test(jl)) {
+        if (lc(order.county).trim() !== jl.replace(/\s*county$/, '').trim()) return false;
+      } else if (jl !== lc(order.city).trim()) {
+        // Unrecognized jurisdiction string: apply only on an exact city match.
+        return false;
+      }
+    }
+  } else {
+    // Legacy: skip a county-specific rule when the order is in a different county.
+    const rc = ruleCounty(rule);
+    if (rc && lc(order.county) !== lc(rc)) return false;
+  }
 
   const applies = (rule.appliesTo || []).map(lc);
   const type = lc(order.aduType);
@@ -127,8 +150,8 @@ function fmtValue(metric, v) {
   return `${v}'`.replace(".5'", "'-6\"");
 }
 
-// Evaluate one rule against the order. Returns a result row, or null if N/A.
-export function evaluateRule(rule, order) {
+// Evaluate one rule against the order (raw). Returns a result row, or null if N/A.
+function evaluateRuleCore(rule, order) {
   if (!ruleApplies(rule, order)) return null;
 
   const base = {
@@ -178,6 +201,52 @@ export function evaluateRule(rule, order) {
 
   // Everything else is surfaced for human judgment, still cited.
   return { ...base, metric, yourValue: '—', threshold: rule.threshold || '—', status: STATUS.REVIEW };
+}
+
+// Is this rule a LOCAL standard (city/county), vs uniform state law?
+function isLocalRule(rule) {
+  const j = lc(rule.jurisdiction || '').trim();
+  if (j) return j !== 'state' && j !== 'california';
+  return Boolean(ruleCounty(rule));
+}
+
+// Evaluate one rule with the city-pipeline safety gates applied:
+//  1. State-preemption clamp — a local rule demanding more than CA state law
+//     lets cities require (side/rear setback > 4 ft, height allowance < 16 ft)
+//     can never FLAG/PASS a customer; it surfaces as REVIEW with a
+//     "state law controls" note. Belt-and-braces even for Verified rows.
+//  2. Pending gate — rules drafted by the city researcher but not yet
+//     human-verified can only ever REVIEW. This is what keeps the
+//     "never a confident wrong answer" guarantee intact.
+export function evaluateRule(rule, order) {
+  const row = evaluateRuleCore(rule, order);
+  if (!row) return null;
+
+  if (isLocalRule(rule) && row.metric && (row.status === STATUS.FLAG || row.status === STATUS.PASS)) {
+    const parsed = parseThreshold(rule.threshold);
+    if (parsed.numeric) {
+      const preempted =
+        ((row.metric === 'sideSetbackFt' || row.metric === 'rearSetbackFt') && parsed.op === '>=' && parsed.value > 4) ||
+        (row.metric === 'heightFt' && (parsed.op === '<=' || parsed.op === '<') && parsed.value < 16);
+      if (preempted) {
+        return {
+          ...row,
+          status: STATUS.REVIEW,
+          ruleText: `${row.ruleText ? row.ruleText + ' ' : ''}[Local standard appears stricter than current CA state law allows — state law controls (Cal. Gov. Code §66314). Verify with your planner.]`,
+        };
+      }
+    }
+  }
+
+  if (lc(rule.verification) === 'pending') {
+    return {
+      ...row,
+      status: STATUS.REVIEW,
+      yourValue: '—',
+      ruleText: `${row.ruleText ? row.ruleText + ' ' : ''}[Local standard drafted from the municipal code — pending Annex verification; confirm with your planner.]`,
+    };
+  }
+  return row;
 }
 
 // Run the whole ruleset. Returns { rows, summary }.
