@@ -74,7 +74,16 @@ async function processOnce() {
   const pending = filterPending(allOrders);
   const sessionIndex = buildSessionIndex(allOrders);
   log(`Found ${pending.length} order(s) to process.`);
-  if (!pending.length) return 0;
+
+  // City-rules research + refresh must run even on idle polls (coverage is
+  // driven by ALL orders' cities, not just pending ones) — so it lives in a
+  // helper called from BOTH exits of this function.
+  const citySweep = async () => {
+    try { await ensureCityCoverage(allOrders, rules, log); } catch (e) { log(`(city coverage skipped: ${e.message})`); }
+    try { await refreshStaleCities(rules, log); } catch (e) { log(`(city refresh skipped: ${e.message})`); }
+  };
+
+  if (!pending.length) { await citySweep(); return 0; }
 
   let done = 0;
 
@@ -194,11 +203,8 @@ async function processOnce() {
     }
   }
 
-  // ── City-rules research (AFTER all orders, so it never delays a report) ──
-  // New city seen in an order → one research job drafts Pending rules + a
-  // coverage marker; stale cities get a ~90-day drift re-check (alert-only).
-  try { await ensureCityCoverage(allOrders, rules, log); } catch (e) { log(`(city coverage skipped: ${e.message})`); }
-  try { await refreshStaleCities(rules, log); } catch (e) { log(`(city refresh skipped: ${e.message})`); }
+  // City-rules research AFTER all orders, so it never delays a report.
+  await citySweep();
 
   return done;
 }
