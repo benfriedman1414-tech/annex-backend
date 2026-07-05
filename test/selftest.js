@@ -215,6 +215,15 @@ const wrongCity = evaluateOrder(RULES.concat(CITY_RULES), normalizeOrder({ id: '
 const ccMax = wrongCity.rows.filter((r) => /city maximum/i.test(r.requirement));
 assert(ccMax.length === 1 && /Concord/.test(ccMax[0].citation) && ccMax[0].status === STATUS.FLAG, 'a Concord order gets CONCORD\'s rule (812 > 700 → FLAG)');
 
+// ── Test 9: auto-verify policy — only source-confirmed, high-confidence rules activate ──
+divider('TEST 9 — auto-verify policy (replaces the human verification step)');
+const { autoVerifyDecision } = await import('../src/cityrules.js');
+assert(autoVerifyDecision({ supported: true, confidence: 'high', preemptNote: false }) === 'verify', 'source-confirmed at high confidence → auto-activates');
+assert(autoVerifyDecision({ supported: true, confidence: 'medium', preemptNote: false }) === 'hold', 'medium confidence → held as review-only');
+assert(autoVerifyDecision({ supported: false, confidence: 'high', preemptNote: false }) === 'hold', 'refuted → held');
+assert(autoVerifyDecision({ supported: true, confidence: 'high', preemptNote: true }) === 'hold', 'possibly-preempted rules NEVER auto-activate');
+assert(autoVerifyDecision({ supported: undefined, confidence: undefined, preemptNote: false }) === 'hold', 'missing verdict → held (fail-safe)');
+
 // ── Write a sample report so we can eyeball the design ──
 fs.mkdirSync(outDir, { recursive: true });
 const sampleFile = path.join(outDir, 'SAMPLE-report.html');
