@@ -48,13 +48,16 @@ export async function fetchRules() {
       jurisdiction: pick(f, ['Jurisdiction']) || '',
       verification: pick(f, ['Verification']) || '',
       lastChecked: pick(f, ['Last checked']) || '',
+      sourceUrl: pick(f, ['Source URL']) || '',
     };
   }).filter((r) => r.requirement);
 }
 
 // Create rule rows (the city-research drafter). Airtable caps 10 per request.
+// Returns the created records (id + fields) so the auto-verifier can act on them.
 export async function createRules(rows) {
   const url = `${API}/${config.airtable.baseId}/${encodeURIComponent(config.airtable.rulesTable)}`;
+  const created = [];
   for (let i = 0; i < rows.length; i += 10) {
     const res = await fetch(url, {
       method: 'POST',
@@ -62,8 +65,10 @@ export async function createRules(rows) {
       body: JSON.stringify({ typecast: true, records: rows.slice(i, i + 10).map((fields) => ({ fields })) }),
     });
     if (!res.ok) throw new Error(`Airtable rules create failed: ${res.status} ${await res.text()}`);
+    const data = await res.json();
+    created.push(...(data.records || []));
   }
-  return rows.length;
+  return created;
 }
 
 // Patch fields on a Rules row (e.g. the coverage marker's "Last checked").

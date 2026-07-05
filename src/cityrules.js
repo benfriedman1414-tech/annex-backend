@@ -125,6 +125,127 @@ export async function researchCity(city, county) {
 const today = () => new Date().toISOString().slice(0, 10);
 const titleCase = (s) => (s || '').trim().toLowerCase().replace(/\b[a-z]/g, (c) => c.toUpperCase());
 
+// ── Automated verification (replaces the human "flip to Verified" step) ──
+// A SECOND, independent model pass fetches each drafted rule's cited source
+// and confirms the exact threshold appears there. Only source-confirmed,
+// high-confidence, non-preempted rules auto-activate; everything else stays
+// Pending (= cited REVIEW rows — informative, never wrong). The engine-side
+// preemption clamp still applies even to Verified rows.
+const VERIFY_TOOL = {
+  name: 'record_verification',
+  description: 'Record, for every drafted rule, whether its threshold + citation are supported by the source material. Call exactly once.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      verdicts: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            requirement: { type: 'string', description: 'Copied exactly from the drafted rule being verified' },
+            supported: { type: 'boolean', description: 'true ONLY if the source material explicitly supports this exact threshold and citation' },
+            confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
+            note: { type: 'string', description: 'One line: where it was confirmed, or what did not match' },
+          },
+          required: ['requirement', 'supported', 'confidence'],
+        },
+      },
+    },
+    required: ['verdicts'],
+  },
+};
+
+const VERIFY_SYSTEM = [
+  'You are an independent verifier for Annex. Another researcher drafted city ADU rules; your ONLY job is to try to CONFIRM or REFUTE each one against the actual source.',
+  'For each drafted rule, check: (1) the cited code section exists, (2) the threshold number/requirement matches the CURRENT source text exactly, (3) the rule is city-specific (not a restatement of uniform CA state law).',
+  'Source page excerpts are provided where available; use web search to check anything not covered by the excerpts.',
+  'Be adversarial: supported=true with confidence=high ONLY when you can point to the exact source language. When in doubt, supported=false or confidence=medium — a held rule is harmless (it surfaces as a cited review item), a wrongly confirmed rule damages a paid report.',
+  'Finish by calling record_verification exactly once, with a verdict for EVERY drafted rule.',
+].join('\n');
+
+async function fetchExcerpt(url, maxLen = 12000) {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(20000), headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AnnexVerify/1.0)' } });
+    if (!res.ok) return null;
+    const html = await res.text();
+    const text = html
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;|&amp;|&lt;|&gt;|&#\d+;/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return text.slice(0, maxLen) || null;
+  } catch { return null; }
+}
+
+// Pure decision policy (unit-tested): activate only what the verifier
+// confirmed at high confidence and the drafter didn't flag as preempted.
+export function autoVerifyDecision({ supported, confidence, preemptNote }) {
+  if (preemptNote) return 'hold';
+  if (supported === true && confidence === 'high') return 'verify';
+  return 'hold';
+}
+
+// Verify one city's Pending rules (Airtable rule records) and flip the
+// confirmed ones to Verified. Returns { verified, held }.
+export async function autoVerifyCityRules(city, pendingRecords, log = () => {}) {
+  if (!cityResearchEnabled() || !pendingRecords.length) return { verified: 0, held: pendingRecords.length };
+
+  // Ground the verifier: fetch each distinct cited source page once.
+  const urls = [...new Set(pendingRecords.map((r) => r.sourceUrl).filter(Boolean))].slice(0, 6);
+  const excerpts = [];
+  for (const u of urls) {
+    const t = await fetchExcerpt(u);
+    if (t) excerpts.push({ url: u, text: t });
+  }
+
+  const user = [
+    `City: ${city}, California. Verify these drafted ADU rules:`,
+    ...pendingRecords.map((r, i) => `${i + 1}. requirement: ${JSON.stringify(r.requirement)} · threshold: ${JSON.stringify(r.threshold)} · citation: ${JSON.stringify(r.citation)}${r.sourceUrl ? ` · claimed source: ${r.sourceUrl}` : ''}`),
+    '',
+    excerpts.length ? 'SOURCE PAGE EXCERPTS (fetched just now):' : 'No source pages could be fetched — verify via web search.',
+    ...excerpts.map((e) => `--- ${e.url} ---\n${e.text}`),
+  ].join('\n');
+
+  const body = {
+    max_tokens: 8000,
+    system: VERIFY_SYSTEM,
+    tools: [
+      { type: 'web_search_20250305', name: 'web_search', max_uses: 5 },
+      VERIFY_TOOL,
+    ],
+    messages: [{ role: 'user', content: user }],
+  };
+  let data;
+  try {
+    data = await callModel(config.remediation.model, body, { forceTool: false, withFallbacks: true });
+    if (data.stop_reason === 'refusal') throw new Error('model declined');
+    if (!(data.content || []).some((b) => b.type === 'tool_use' && b.name === VERIFY_TOOL.name)) throw new Error('no tool call');
+  } catch (e) {
+    data = await callModel(config.remediation.fallbackModel, body, { forceTool: false, withFallbacks: false });
+  }
+  const call = (data.content || []).find((b) => b.type === 'tool_use' && b.name === VERIFY_TOOL.name);
+  if (!call) throw new Error('verifier produced no record_verification call');
+  const verdicts = new Map((call.input.verdicts || []).map((v) => [(v.requirement || '').toLowerCase().trim(), v]));
+
+  let verified = 0, held = 0;
+  for (const rec of pendingRecords) {
+    const v = verdicts.get((rec.requirement || '').toLowerCase().trim());
+    const preemptNote = /preempted/i.test(rec.rule || '');
+    const decision = v ? autoVerifyDecision({ supported: v.supported, confidence: v.confidence, preemptNote }) : 'hold';
+    if (decision === 'verify') {
+      await updateRuleFields(rec.id, { Verification: 'Verified' });
+      verified++;
+      log(`  ✓ verified: ${rec.requirement}`);
+    } else {
+      held++;
+      log(`  ○ held (review-only): ${rec.requirement}${v && v.note ? ` — ${v.note.slice(0, 80)}` : ''}`);
+    }
+  }
+  return { verified, held };
+}
+
 // Persist drafted rules + the coverage marker. Every drafted row is
 // Verification="Pending" — the engine will only ever REVIEW it.
 export async function writeCityRules(city, county, research) {
@@ -139,6 +260,7 @@ export async function writeCityRules(city, county, research) {
     Jurisdiction: jur,
     Verification: 'Pending',
     'Last checked': today(),
+    'Source URL': r.sourceUrl || '',
   }));
   rows.push({
     Requirement: `City research: ${titleCase(city)}`,
@@ -147,8 +269,19 @@ export async function writeCityRules(city, county, research) {
     Verification: 'Marker',
     'Last checked': today(),
   });
-  await createRules(rows);
-  return rows.length - 1; // drafted rule count (marker excluded)
+  const created = await createRules(rows);
+  // Hand back the drafted (non-marker) records in verifier shape.
+  const drafted = created
+    .filter((rec) => (rec.fields.Verification || '') === 'Pending')
+    .map((rec) => ({
+      id: rec.id,
+      requirement: rec.fields.Requirement || '',
+      threshold: rec.fields.Threshold || '',
+      citation: rec.fields['Code citation'] || '',
+      rule: rec.fields.Rule || '',
+      sourceUrl: rec.fields['Source URL'] || '',
+    }));
+  return drafted;
 }
 
 // ── Coverage sweep (called by the worker after each poll) ──────
@@ -185,14 +318,21 @@ export async function ensureCityCoverage(allOrders, rules, log = () => {}, maxPe
     try {
       log(`⌕ researching city ADU standards: ${city} (${county} County)…`);
       const research = await researchCity(city, county);
-      const n = await writeCityRules(city, county, research);
-      log(`⌕ ${city}: ${n} draft rule(s) written (Pending verification)`);
+      const drafted = await writeCityRules(city, county, research);
+      log(`⌕ ${city}: ${drafted.length} draft rule(s) written — running independent verification…`);
+      // Second, independent pass: confirm each rule against its cited source,
+      // then auto-activate the confirmed ones. Holds are cited REVIEW rows.
+      let vr = { verified: 0, held: drafted.length };
+      try { vr = await autoVerifyCityRules(city, drafted, log); }
+      catch (e) { log(`  (auto-verify failed: ${e.message} — all rules held as review-only)`); }
+      log(`⌕ ${city}: ${vr.verified} auto-verified (active) · ${vr.held} held as review-only`);
       try {
-        await sendOwnerAlert(`New city researched: ${city} — ${n} draft rule(s) to verify`, [
-          `A customer order arrived for ${city} (${county} County), which had no city-level rules yet.`,
-          research.found === false ? 'NOTE: no city-specific ADU ordinance was confidently located — review the marker row.' : `${n} draft rule(s) were written to the Rules table with Verification = "Pending".`,
-          'Until you verify them, they appear in reports as cited REVIEW items only — never PASS/FLAG.',
-          'To activate: open the Rules table, eyeball each citation against its source, and set Verification to "Verified" (or "Superseded" for anything state law overrides).',
+        await sendOwnerAlert(`FYI: new city covered — ${city} (${vr.verified} rules active, ${vr.held} review-only)`, [
+          `A customer order arrived for ${city} (${county} County), which had no city-level rules yet. No action needed.`,
+          research.found === false ? 'NOTE: no city-specific ADU ordinance was confidently located.' : `${drafted.length} rule(s) were drafted from the current municipal code, then independently re-verified against the cited sources.`,
+          `${vr.verified} rule(s) passed source verification and are now ACTIVE (auto-checked pass/flag).`,
+          `${vr.held} rule(s) were held as cited review-only items (verifier couldn't confirm them at high confidence — harmless, never wrong).`,
+          'Optional: you can still overrule anything in the Rules table (Verification column: Verified / Pending / Superseded).',
           `Sources: ${(research.sources || []).slice(0, 4).join(' · ')}`,
         ]);
       } catch (e) { log(`  (alert failed: ${e.message})`); }
