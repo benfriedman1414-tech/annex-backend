@@ -65,7 +65,7 @@ export async function sendTeaserEmail({ name, email, teaser, unlockUrl }) {
     '',
     `Your full report unlocks the exact requirement, code citation, and your number vs. the limit for every check — plus engine-verified fix options for anything flagged.`,
     '',
-    `Unlock your full report ($99): ${unlockUrl}`,
+    `Unlock your full report ($49): ${unlockUrl}`,
     '',
     `Your answers are saved — the link above picks up right where you left off.`,
     '',
@@ -78,7 +78,7 @@ export async function sendTeaserEmail({ name, email, teaser, unlockUrl }) {
     text,
     html: `<div style="font-family:sans-serif;font-size:15px;line-height:1.65;color:#222">${
       lines.map((l) => l.startsWith('Unlock your full report')
-        ? `<p style="margin:18px 0"><a href="${unlockUrl}" style="background:#059669;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600">Unlock your full report — $99</a></p>`
+        ? `<p style="margin:18px 0"><a href="${unlockUrl}" style="background:#059669;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600">Unlock your full report — $49</a></p>`
         : `<p style="margin:0 0 10px">${l.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</p>`).join('')
     }</div>`,
   });
